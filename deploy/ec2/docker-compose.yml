@@ -1,0 +1,52 @@
+# EC2 deployment of the Search API (routego-core). Started by start.sh, which reads the database
+# password from Secrets Manager first — there is no .env file for this service.
+# Real AWS is used here: Secrets Manager and SQS through the EC2 instance role.
+#
+# Postgres is NOT defined here: Search uses the Postgres container that already runs on this server
+# (ec2-postgres-1, database routego_search, user search_user). Joining that container's network is
+# what makes the host name "postgres" in the database secret resolve, and what lets the portal
+# reach this service as http://search:8080/.
+name: routego-search
+services:
+  # One-shot helper: applies the SQL migrations, then exits. It is not a long-running container.
+  migrate:
+    image: postgres:17
+    command: ["bash", "/deploy/apply-migrations.sh"]
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${SEARCH_DB_NAME:?run start.sh, which reads it from Secrets Manager}
+      PGUSER: ${SEARCH_DB_USER:?run start.sh, which reads it from Secrets Manager}
+      PGPASSWORD: ${SEARCH_DB_PASSWORD:?run start.sh, which reads it from Secrets Manager}
+    volumes:
+      - ../../migrations:/migrations:ro
+      - ./apply-migrations.sh:/deploy/apply-migrations.sh:ro
+
+  search:
+    image: routego/search:latest
+    restart: unless-stopped
+    ports:
+      - "5003:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      AWS_REGION: ap-south-1
+      # An always-on process serving concurrent requests; 10 connections is plenty on one small server.
+      DB_CONNECTION_PROFILE: ManagedInstances
+      DB_MAX_POOL_SIZE: "10"
+      SEARCH_CUTOFF_MINUTES: "30"
+      PAGE_SIZE: "20"
+      # search-q receives Fleet's trip events and Seat Inventory's seat events (SNS subscriptions).
+      SEARCH_QUEUE_URL: https://sqs.ap-south-1.amazonaws.com/675252699468/search-q
+      SEARCH_DEAD_LETTER_QUEUE_URL: https://sqs.ap-south-1.amazonaws.com/675252699468/search-dlq
+      # Workstation GC: a server-GC heap per core is too much on this 1 GB instance.
+      DOTNET_gcServer: "0"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+networks:
+  default:
+    name: ec2_default
+    external: true

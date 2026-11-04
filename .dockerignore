@@ -1,0 +1,16 @@
+**/bin/
+**/obj/
+**/.vs/
+**/*.user
+.git/
+.agents/
+.claude/
+.env
+RouteGo.Search.Api.Tests/
+RouteGo.Search.Api.AppHost/
+specs/
+local/
+migrations/
+deploy/
+docker-compose.yml
+Dockerfile

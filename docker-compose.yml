@@ -1,0 +1,29 @@
+# LOCAL DEVELOPMENT ONLY — nothing here touches a real AWS account.
+#   docker compose up -d        # LocalStack with the search queue, its DLQ and the topic subscriptions
+#   dotnet run --project RouteGo.Search.Api
+#
+# The database is not here: run Postgres as you already do (the app reads its connection from the
+# 'database/postgresql/route-go-search-api' user-secret) and apply migrations/ to it.
+#
+# Already running a LocalStack for another RouteGo service on port 4566? Then do not start this one;
+# run the init script against that LocalStack instead, so Fleet's events reach Search's queue:
+#   docker exec -i <localstack-container> bash < local/localstack/init-aws.sh
+
+services:
+  localstack:
+    image: localstack/localstack:4.4
+    container_name: routego-search-localstack
+    environment:
+      SERVICES: sqs,sns
+      AWS_DEFAULT_REGION: ap-south-1
+    ports:
+      - "4566:4566"
+    volumes:
+      # Runs once LocalStack is ready: creates the topics, queues and subscriptions.
+      - ./local/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+    healthcheck:
+      # Healthy only after the init script has created the search queue.
+      test: ["CMD-SHELL", "awslocal sqs get-queue-url --queue-name search-q >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
